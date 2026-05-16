@@ -10,7 +10,7 @@
     "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
     "compile": "hardhat --config hardhat.config.cjs compile",
-    "deploy:baseSepolia": "hardhat --config hardhat.config.cjs run scripts/deploy.js --network baseSepolia"
+    "deploy:baseSepolia": "hardhat --config hardhat.config.cjs run scripts/deploy.cjs --network baseSepolia"
   },
   "dependencies": {
     "@tychilabs/react-ugf": "^1.0.8",
