@@ -4,6 +4,7 @@ import { useUGFModal } from "@tychilabs/react-ugf";
 import { CONTRACT_ADDRESS, CONTRACT_ABI, CHAIN_ID } from "../config/contract";
 import { useWallet } from "../context/WalletContext";
 import { useAchievement } from "../context/AchievementContext";
+import toast from "react-hot-toast";
 
 /**
  * useMintNFT — Core UGF gasless minting hook
@@ -107,6 +108,22 @@ export function useMintNFT() {
       });
 
       const txHash  = result?.txHash || result?.transactionHash || "demo_" + Date.now();
+
+      // 🔒 Robust Security: Wait for transaction mining/confirmation on blockchain
+      if (txHash && !txHash.startsWith("demo_") && signer.provider) {
+        toast.loading("Verifying blockchain transaction...", { id: "ugf-mint-confirm" });
+        try {
+          const receipt = await signer.provider.waitForTransaction(txHash);
+          toast.dismiss("ugf-mint-confirm");
+          if (!receipt || receipt.status === 0) {
+            throw new Error("On-chain transaction execution failed or was reverted.");
+          }
+        } catch (confirmErr) {
+          toast.dismiss("ugf-mint-confirm");
+          throw new Error("Blockchain verification failed: " + (confirmErr?.message || "Transaction was rejected or failed."));
+        }
+      }
+
       const tokenId = result?.tokenId ?? Math.floor(Math.random() * 10000);
 
       const mintData = {
