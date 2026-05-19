@@ -13,9 +13,9 @@ import "./styles/index.css";
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
-    <AuthProvider>                    {/* ← Added here */}
-      <UGFProvider>
-        <WalletProvider>
+    <WalletProvider>
+      <AuthProvider>
+        <UGFProvider>
           <AchievementProvider>
             <BrowserRouter>
               <App />
@@ -40,8 +40,8 @@ ReactDOM.createRoot(document.getElementById("root")).render(
               />
             </BrowserRouter>
           </AchievementProvider>
-        </WalletProvider>
-      </UGFProvider>
-    </AuthProvider>
+        </UGFProvider>
+      </AuthProvider>
+    </WalletProvider>
   </React.StrictMode>
 );

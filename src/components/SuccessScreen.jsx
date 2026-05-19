@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { motion } from "framer-motion";
+import { useNavigate } from "react-router-dom";
 import { EXPLORER_URL } from "../config/contract";
 
 /**
@@ -8,6 +9,7 @@ import { EXPLORER_URL } from "../config/contract";
  */
 export default function SuccessScreen({ mintResult, achievement, onClose }) {
   const confettiRef = useRef(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
     spawnConfetti(confettiRef.current);
@@ -19,6 +21,11 @@ export default function SuccessScreen({ mintResult, achievement, onClose }) {
 
   const copyTxHash = () => {
     navigator.clipboard.writeText(txHash).catch(() => {});
+  };
+
+  const handleGoToDashboard = () => {
+    onClose();
+    navigate("/dashboard");
   };
 
   return (
@@ -143,7 +150,7 @@ export default function SuccessScreen({ mintResult, achievement, onClose }) {
         )}
         <button
           id="success-close-btn"
-          onClick={onClose}
+          onClick={handleGoToDashboard}
           className="flex-1 btn-primary text-sm py-2.5"
         >
           🏠 Go to Dashboard

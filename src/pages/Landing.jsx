@@ -3,6 +3,7 @@ import { motion, useScroll, useTransform } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { useWallet } from "../context/WalletContext";
 import { UGFBadge, NoEthBadge, GaslessBadge } from "../components/UGFBadge";
+import toast from "react-hot-toast";
 
 const FLOATING_CARDS = [
   { emoji: "🎓", title: "Web3 Builder",      type: "certificate", color: "#6366f1", rotate: -6,  x: -60, y: -30 },
@@ -33,8 +34,21 @@ export default function Landing() {
   const heroY = useTransform(scrollYProgress, [0, 1], [0, -60]);
 
   const handleConnect = async () => {
+    if (isConnected) {
+      navigate("/dashboard");
+      return;
+    }
+    if (!window.ethereum) {
+      toast.error("MetaMask extension not found. Please install the MetaMask wallet extension to use this app!");
+      return;
+    }
     const ok = await connectWallet();
-    if (ok) navigate("/dashboard");
+    if (ok) {
+      toast.success("Wallet connected successfully!");
+      navigate("/dashboard");
+    } else {
+      toast.error("Failed to connect MetaMask. Please authorize the connection request.");
+    }
   };
 
   return (
@@ -155,7 +169,7 @@ export default function Landing() {
                   y: { duration: 4 + i, repeat: Infinity, ease: "easeInOut", delay: i * 0.5 },
                 }}
               >
-                <div className={`h-1 w-full bg-gradient-to-r from-[${card.color}] to-purple-500 rounded mb-3`}
+                <div className="h-1 w-full rounded mb-3"
                   style={{ background: `linear-gradient(to right, ${card.color}, #a855f7)` }}
                 />
                 <div className="text-3xl mb-2">{card.emoji}</div>

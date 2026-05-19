@@ -67,6 +67,21 @@ export function useMintNFT() {
     setMintResult(null);
 
     try {
+      // 🔒 Security Validation: Address Boundary Check
+      if (
+        !achievement.studentWalletAddress ||
+        achievement.studentWalletAddress.toLowerCase() !== address.toLowerCase()
+      ) {
+        throw new Error(
+          "Unauthorized: This certificate is not assigned to your connected wallet address."
+        );
+      }
+
+      // 🔒 Security Validation: Duplicate Claims Check
+      if (achievement.claimed) {
+        throw new Error("This certificate has already been claimed as an NFT proof.");
+      }
+
       const tokenURI = buildTokenURI(achievement, address);
 
       // Encode the smart contract call

@@ -58,7 +58,7 @@ export function WalletProvider({ children }) {
   }, []);
 
   // Connect Wallet
-  const connectWallet = useCallback(async () => {
+  const connectWallet = useCallback(async (options = {}) => {
     if (!window.ethereum) {
       setError("MetaMask not found.");
       return false;
@@ -68,6 +68,24 @@ export function WalletProvider({ children }) {
     setError(null);
 
     try {
+      // Force account selection screen if requested or if we have an explicit switch/disconnect flag
+      const forceSelect = options.forceSelect || localStorage.getItem("forceWalletSelect") === "true";
+
+      if (forceSelect) {
+        try {
+          await window.ethereum.request({
+            method: "wallet_requestPermissions",
+            params: [{ eth_accounts: {} }],
+          });
+        } catch (permErr) {
+          console.warn("Account selection rejected:", permErr);
+          return false;
+        } finally {
+          // Always clear the flag once permission request is attempted
+          localStorage.removeItem("forceWalletSelect");
+        }
+      }
+
       const accounts = await window.ethereum.request({
         method: "eth_requestAccounts",
       });
@@ -106,6 +124,7 @@ export function WalletProvider({ children }) {
   const disconnectWallet = useCallback(() => {
     // REMOVE SESSION
     localStorage.removeItem("walletConnected");
+    localStorage.setItem("forceWalletSelect", "true"); // Force account selection on next manual connect
 
     setAddress(null);
     setSigner(null);
@@ -129,12 +148,17 @@ export function WalletProvider({ children }) {
 
       if (!window.ethereum) return;
 
+      setIsConnecting(true);
+
       try {
         const accounts = await window.ethereum.request({
           method: "eth_accounts",
         });
 
-        if (accounts.length === 0) return;
+        if (accounts.length === 0) {
+          setIsConnecting(false);
+          return;
+        }
 
         const prov = new ethers.BrowserProvider(
           window.ethereum
@@ -158,6 +182,8 @@ export function WalletProvider({ children }) {
         await updateBalance(prov, addr);
       } catch {
         // silent
+      } finally {
+        setIsConnecting(false);
       }
     };
 

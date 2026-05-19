@@ -5,12 +5,10 @@ import Dashboard from "./pages/Dashboard";
 import Achievements from "./pages/Achievements";
 import Verify from "./pages/Verify";
 import AdminPanel from "./pages/AdminPanel";
-
-import { useWallet } from "./context/WalletContext";
+import CompleteProfile from "./pages/CompleteProfile";
+import ProtectedRoute from "./components/ProtectedRoute";
 
 export default function App() {
-  const { isConnected } = useWallet();
-
   return (
     <>
       <Navbar />
@@ -19,32 +17,37 @@ export default function App() {
         {/* Public Route */}
         <Route path="/" element={<Landing />} />
 
+        {/* Complete Profile Page */}
+        <Route path="/complete-profile" element={<CompleteProfile />} />
+
         {/* Protected Routes */}
         <Route
           path="/dashboard"
           element={
-            isConnected ? <Dashboard /> : <Navigate to="/" replace />
+            <ProtectedRoute allowedRoles={["student", "admin"]}>
+              <Dashboard />
+            </ProtectedRoute>
           }
         />
 
         <Route
           path="/achievements"
           element={
-            isConnected ? <Achievements /> : <Navigate to="/" replace />
+            <ProtectedRoute allowedRoles={["student", "admin"]}>
+              <Achievements />
+            </ProtectedRoute>
           }
         />
 
-        <Route
-          path="/verify"
-          element={
-            isConnected ? <Verify /> : <Navigate to="/" replace />
-          }
-        />
+        <Route path="/verify" element={<Verify />} />
+        <Route path="/verify/:certificateId" element={<Verify />} />
 
         <Route
           path="/admin"
           element={
-            isConnected ? <AdminPanel /> : <Navigate to="/" replace />
+            <ProtectedRoute allowedRoles={["admin"]}>
+              <AdminPanel />
+            </ProtectedRoute>
           }
         />
 

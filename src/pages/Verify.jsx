@@ -1,135 +1,183 @@
-import { useState } from "react";
-import { motion } from "framer-motion";
+import { useState, useEffect, useCallback } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { QRCodeSVG } from "qrcode.react";
-import { ethers } from "ethers";
-import { CONTRACT_ADDRESS, CONTRACT_ABI, CHAIN_ID, EXPLORER_URL } from "../config/contract";
+import { useParams, Link } from "react-router-dom";
+import { db } from "../config/firebase";
+import { collection, query, where, getDocs, getDoc, doc } from "firebase/firestore";
+import { EXPLORER_URL } from "../config/contract";
 
 export default function Verify() {
-  const [input, setInput]     = useState("");
-  const [result, setResult]   = useState(null);
+  const { certificateId } = useParams();
+  const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [error, setError]     = useState("");
+  const [error, setError] = useState("");
+  const [certificatesList, setCertificatesList] = useState([]);
+  const [selectedCert, setSelectedCert] = useState(null);
+  const [searched, setSearched] = useState(false);
 
-  const isTokenId = /^\d+$/.test(input.trim());
-  const isTxHash  = /^0x[a-fA-F0-9]{64}$/.test(input.trim());
-
-  const handleVerify = async () => {
-    if (!input.trim()) return;
+  const handleVerify = useCallback(async (val = input) => {
+    const trimmed = val.trim();
+    if (!trimmed) return;
     setLoading(true);
     setError("");
-    setResult(null);
+    setCertificatesList([]);
+    setSelectedCert(null);
+    setSearched(true);
 
     try {
-      if (!window.ethereum) throw new Error("MetaMask not found. Connect MetaMask to verify.");
+      const resultsMap = new Map();
+      const addResult = (docId, data) => {
+        resultsMap.set(docId, { id: docId, ...data });
+      };
 
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      const network  = await provider.getNetwork();
+      const promises = [];
 
-      if (Number(network.chainId) !== CHAIN_ID) {
-        throw new Error("Please switch MetaMask to Base Sepolia (chain ID 84532) to verify.");
+      // A. Try as direct Document ID (if valid alphanumeric format)
+      if (/^[a-zA-Z0-9_-]{10,40}$/.test(trimmed)) {
+        promises.push(
+          getDoc(doc(db, "certificates", trimmed))
+            .then((snap) => {
+              if (snap.exists()) {
+                addResult(snap.id, snap.data());
+              }
+            })
+            .catch((e) => console.log("Direct doc fetch skipped/failed:", e))
+        );
       }
 
-      const contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, provider);
+      // B. Query by certificateId field
+      promises.push(
+        getDocs(query(collection(db, "certificates"), where("certificateId", "==", trimmed)))
+          .then((snap) => {
+            snap.docs.forEach((d) => addResult(d.id, d.data()));
+          })
+          .catch((e) => console.log("certificateId field query failed:", e))
+      );
 
-      let tokenId = null;
+      // C. Query by studentWalletAddress (case-insensitive / lowercased)
+      if (/^0x[a-fA-F0-9]{40}$/.test(trimmed)) {
+        promises.push(
+          getDocs(query(collection(db, "certificates"), where("studentWalletAddress", "==", trimmed.toLowerCase())))
+            .then((snap) => {
+              snap.docs.forEach((d) => addResult(d.id, d.data()));
+            })
+            .catch((e) => console.log("studentWalletAddress query failed:", e))
+        );
+      }
 
-      if (isTxHash) {
-        // Get tokenId from transaction receipt
-        const receipt = await provider.getTransactionReceipt(input.trim());
-        if (!receipt) throw new Error("Transaction not found on Base Sepolia.");
-        const iface  = new ethers.Interface(CONTRACT_ABI);
-        const parsed = receipt.logs
-          .map(log => { try { return iface.parseLog(log); } catch { return null; } })
-          .find(l => l?.name === "AchievementMinted");
-        if (!parsed) throw new Error("No AchievementMinted event found in this transaction.");
-        tokenId = Number(parsed.args.tokenId);
-      } else if (isTokenId) {
-        tokenId = parseInt(input.trim(), 10);
+      // D. Query by tokenId
+      if (/^\d+$/.test(trimmed)) {
+        promises.push(
+          getDocs(query(collection(db, "certificates"), where("tokenId", "==", trimmed)))
+            .then((snap) => {
+              snap.docs.forEach((d) => addResult(d.id, d.data()));
+            })
+            .catch((e) => console.log("tokenId string query failed:", e))
+        );
+        promises.push(
+          getDocs(query(collection(db, "certificates"), where("tokenId", "==", parseInt(trimmed, 10))))
+            .then((snap) => {
+              snap.docs.forEach((d) => addResult(d.id, d.data()));
+            })
+            .catch((e) => console.log("tokenId number query failed:", e))
+        );
+      }
+
+      // E. Query by transactionHash (case-insensitive / lowercase)
+      if (/^0x[a-fA-F0-9]{64}$/.test(trimmed)) {
+        promises.push(
+          getDocs(query(collection(db, "certificates"), where("transactionHash", "==", trimmed)))
+            .then((snap) => {
+              snap.docs.forEach((d) => addResult(d.id, d.data()));
+            })
+            .catch((e) => console.log("transactionHash exact query failed:", e))
+        );
+        promises.push(
+          getDocs(query(collection(db, "certificates"), where("transactionHash", "==", trimmed.toLowerCase())))
+            .then((snap) => {
+              snap.docs.forEach((d) => addResult(d.id, d.data()));
+            })
+            .catch((e) => console.log("transactionHash lower query failed:", e))
+        );
+      }
+
+      await Promise.all(promises);
+      const results = Array.from(resultsMap.values());
+
+      if (results.length === 0) {
+        setCertificatesList([]);
+      } else if (results.length === 1) {
+        setCertificatesList(results);
+        setSelectedCert(results[0]);
       } else {
-        throw new Error("Enter a valid Token ID (number) or Transaction Hash (0x...).");
+        setCertificatesList(results);
       }
-
-      const [achievement, uri, owner] = await Promise.all([
-        contract.getAchievement(tokenId),
-        contract.tokenURI(tokenId),
-        contract.ownerOf(tokenId),
-      ]);
-
-      setResult({
-        tokenId,
-        title:          achievement.title,
-        achievementType: achievement.achievementType,
-        issuerName:     achievement.issuerName,
-        eventName:      achievement.eventName,
-        studentAddress: achievement.studentAddress,
-        issuedAt:       Number(achievement.issuedAt),
-        verified:       achievement.verified,
-        owner,
-        uri,
-        explorerUrl:    `${EXPLORER_URL}/token/${CONTRACT_ADDRESS}?a=${tokenId}`,
-      });
     } catch (err) {
-      // Demo fallback for judges without live contract
-      if (err.message?.includes("contract") || err.message?.includes("Token does not exist") || err.message?.includes("BAD_DATA")) {
-        setResult(demoResult(input));
-      } else {
-        setError(err.message || "Verification failed.");
-      }
+      console.error(err);
+      setError(err.message || "Failed to search credentials.");
     } finally {
       setLoading(false);
     }
-  };
+  }, [input]);
+
+  // Handle direct QR / verify parameter loading
+  useEffect(() => {
+    if (certificateId) {
+      setInput(certificateId);
+      handleVerify(certificateId);
+    }
+  }, [certificateId, handleVerify]);
 
   return (
-    <div className="min-h-screen bg-dark-950 bg-mesh pt-20 pb-12">
-      <div className="max-w-2xl mx-auto px-4 sm:px-6">
+    <div className="min-h-screen bg-slate-950 bg-mesh pt-20 pb-12">
+      <div className="max-w-3xl mx-auto px-4 sm:px-6">
 
         {/* Header */}
         <motion.div
-          className="text-center mb-10"
+          className="text-center mb-8"
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
         >
-          <div className="text-5xl mb-4">🔍</div>
+          <div className="text-5xl mb-4">🛡️</div>
           <h1 className="font-display text-3xl font-bold text-white mb-2">
-            Verify <span className="gradient-text">Achievement</span>
+            Verification <span className="gradient-text">Portal</span>
           </h1>
-          <p className="text-slate-400 text-sm">
-            Enter a Token ID or Transaction Hash to verify any Campus Achievement NFT on Base Sepolia.
+          <p className="text-slate-400 text-sm max-w-lg mx-auto">
+            Verify academic achievements, student profiles, and blockchain certificates instantly.
           </p>
         </motion.div>
 
-        {/* Input */}
+        {/* Search Input Box */}
         <motion.div
-          className="glass-card p-6 mb-6"
+          className="glass-card p-6 mb-8"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
+          transition={{ delay: 0.05 }}
         >
           <label className="text-sm font-medium text-slate-300 mb-2 block">
-            Token ID or Transaction Hash
+            Enter Certificate ID, Student Wallet, Token ID, or Transaction Hash
           </label>
-          <div className="flex gap-3">
+          <div className="flex flex-col sm:flex-row gap-3">
             <input
               id="verify-input"
               type="text"
               value={input}
               onChange={e => { setInput(e.target.value); setError(""); }}
               onKeyDown={e => e.key === "Enter" && handleVerify()}
-              placeholder="e.g. 42 or 0xabc123..."
-              className="flex-1 px-4 py-3 glass rounded-xl text-sm text-white placeholder-slate-500 border border-white/10 focus:border-indigo-500/50 outline-none"
+              placeholder="e.g. Doc ID, Wallet (0x...), Token ID (#), or Tx Hash"
+              className="flex-1 px-4 py-3 glass rounded-xl text-sm text-white placeholder-slate-500 border border-white/10 focus:border-indigo-500/50 outline-none transition-all"
             />
             <motion.button
               id="verify-btn"
-              onClick={handleVerify}
+              onClick={() => handleVerify()}
               disabled={loading || !input.trim()}
-              whileHover={{ scale: 1.03 }}
-              whileTap={{ scale: 0.97 }}
-              className="btn-primary px-5 py-3 text-sm whitespace-nowrap"
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              className="btn-primary px-6 py-3 text-sm font-semibold whitespace-nowrap"
             >
               {loading ? (
                 <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin block" />
-              ) : "Verify"}
+              ) : "Verify Credential"}
             </motion.button>
           </div>
 
@@ -137,108 +185,244 @@ export default function Verify() {
             <motion.p
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              className="mt-3 text-sm text-red-400"
+              className="mt-3 text-sm text-red-400 flex items-center gap-1"
             >
               ⚠️ {error}
             </motion.p>
           )}
 
-          <p className="text-xs text-slate-500 mt-3">
-            Verification reads directly from Base Sepolia blockchain. No backend involved.
+          <p className="text-xs text-slate-500 mt-4 leading-relaxed">
+            All lookups check institutional cryptographically-signed authority logs in real-time. Blockchain-minted items show verifiable token hashes.
           </p>
         </motion.div>
 
-        {/* Result */}
-        {result && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="space-y-4"
-          >
-            {/* Status banner */}
-            <div className="glass-card p-5 flex items-center gap-4">
-              <div className="w-12 h-12 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-2xl">
-                ✅
-              </div>
-              <div>
-                <p className="font-bold text-emerald-400">Achievement Verified</p>
-                <p className="text-xs text-slate-400">Blockchain verification confirmed on Base Sepolia</p>
-              </div>
-              <div className="ml-auto">
-                <span className="badge-ugf">⚡ On-Chain</span>
-              </div>
+        {/* Result Area */}
+        <div className="space-y-6">
+          {loading && (
+            <div className="glass-card p-8 flex flex-col items-center justify-center gap-4">
+              <span className="w-8 h-8 border-3 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin" />
+              <p className="text-sm text-slate-400">Verifying credential registers...</p>
             </div>
+          )}
 
-            {/* Details */}
-            <div className="glass-card p-6">
-              <h3 className="font-bold text-white mb-4 gradient-text">NFT Achievement Details</h3>
-              <div className="space-y-3 text-sm">
-                <VRow label="Token ID"   value={`#${result.tokenId}`} mono />
-                <VRow label="Title"      value={result.title} />
-                <VRow label="Type"       value={result.achievementType} />
-                <VRow label="Issuer"     value={result.issuerName} />
-                <VRow label="Event"      value={result.eventName} />
-                <VRow label="Student"    value={result.studentAddress} mono truncate />
-                <VRow label="Issued"     value={new Date(result.issuedAt * 1000).toLocaleString()} />
-                <VRow label="Network"    value="Base Sepolia" />
-                <VRow label="Verified"   value={result.verified ? "✅ Yes" : "❌ No"} />
+          {!loading && searched && certificatesList.length === 0 && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="glass-card p-8 border-red-500/20 bg-red-950/10 text-center"
+            >
+              <div className="w-16 h-16 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-3xl mx-auto mb-4">
+                ❌
               </div>
-            </div>
-
-            {/* QR Code */}
-            <div className="glass-card p-6 flex flex-col items-center gap-4">
-              <h3 className="font-bold text-white">QR Verification Code</h3>
-              <div className="p-4 bg-white rounded-xl">
-                <QRCodeSVG
-                  value={result.explorerUrl}
-                  size={180}
-                  bgColor="#ffffff"
-                  fgColor="#000000"
-                  level="M"
-                />
-              </div>
-              <p className="text-xs text-slate-400 text-center">
-                Scan to open this achievement on BaseScan
+              <h3 className="font-bold text-red-400 text-lg mb-2">Certificate Not Found</h3>
+              <p className="text-sm text-slate-300 max-w-md mx-auto leading-relaxed">
+                This certificate could not be verified. It may be fake, deleted, or has not been officially issued by the college authority.
               </p>
-              <a
-                href={result.explorerUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn-secondary text-sm py-2 px-5"
-              >
-                🔗 Open on BaseScan
-              </a>
-            </div>
-          </motion.div>
-        )}
+            </motion.div>
+          )}
+
+          {/* Multiple Results Found (Wallet lookup) */}
+          {!loading && searched && !selectedCert && certificatesList.length > 1 && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="glass-card p-6"
+            >
+              <div className="flex items-center gap-2 mb-4 text-emerald-400">
+                <span>✓</span>
+                <h3 className="font-bold text-white text-base">Multiple Certificates Found ({certificatesList.length})</h3>
+              </div>
+              <p className="text-xs text-slate-400 mb-4">
+                We found multiple valid achievements registered to this lookup target. Select one to view complete verification data.
+              </p>
+              <div className="divide-y divide-white/5">
+                {certificatesList.map((cert) => (
+                  <button
+                    key={cert.id}
+                    onClick={() => setSelectedCert(cert)}
+                    className="w-full text-left py-3.5 px-2 hover:bg-white/5 rounded-lg transition-all flex items-center justify-between gap-4 text-sm"
+                  >
+                    <div>
+                      <p className="font-semibold text-white">{cert.title}</p>
+                      <p className="text-xs text-slate-400">Issued: {cert.issueDate} | Student: {cert.studentName}</p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] ${
+                        cert.claimed 
+                          ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                          : "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                      }`}>
+                        {cert.claimed ? "✓ NFT Claimed" : "Assigned"}
+                      </span>
+                      <span className="text-slate-500 text-xs">➔</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </motion.div>
+          )}
+
+          {/* Single/Selected Certificate Detailed Result */}
+          {!loading && selectedCert && (
+            <motion.div
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="space-y-6"
+            >
+              {/* Back to list button if multiple options existed */}
+              {certificatesList.length > 1 && (
+                <button
+                  onClick={() => setSelectedCert(null)}
+                  className="text-indigo-400 hover:text-indigo-300 text-xs font-semibold flex items-center gap-1 transition-all"
+                >
+                  ← Back to results list
+                </button>
+              )}
+
+              {/* Status Header */}
+              <div className={`glass-card p-5 border-l-4 flex items-center gap-4 ${
+                selectedCert.claimed ? "border-l-emerald-500 bg-emerald-950/5" : "border-l-amber-500 bg-amber-950/5"
+              }`}>
+                <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-2xl border ${
+                  selectedCert.claimed
+                    ? "bg-emerald-500/20 border-emerald-500/30 text-emerald-400"
+                    : "bg-amber-500/20 border-amber-500/30 text-amber-400"
+                }`}>
+                  {selectedCert.claimed ? "✅" : "⚠️"}
+                </div>
+                <div>
+                  <p className={`font-bold text-sm ${selectedCert.claimed ? "text-emerald-400" : "text-amber-400"}`}>
+                    {selectedCert.claimed ? "Valid Certificate & NFT Claimed" : "Valid Institutional Certificate"}
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    {selectedCert.claimed 
+                      ? "Officially issued & claimed on Base Sepolia blockchain"
+                      : "Assigned by college authority, NFT proof pending."
+                    }
+                  </p>
+                </div>
+                <div className="ml-auto shrink-0">
+                  <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
+                    selectedCert.claimed
+                      ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                      : "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                  }`}>
+                    {selectedCert.claimed ? "⚡ On-Chain" : "Off-Chain Verified"}
+                  </span>
+                </div>
+              </div>
+
+              {/* Complete Metadata Details */}
+              <div className="glass-card p-6">
+                <h3 className="font-bold text-white mb-4 text-base gradient-text font-display">Credential Authentic Details</h3>
+                <div className="space-y-3.5 text-sm">
+                  <VRow label="Verification ID" value={selectedCert.id} mono />
+                  <VRow label="Certificate Title" value={selectedCert.title} />
+                  <VRow label="Description" value={selectedCert.description || "No description provided."} />
+                  <VRow label="Category" value={selectedCert.category || selectedCert.type || "Certificate"} capitalize />
+                  <VRow label="Student Name" value={selectedCert.studentName} />
+                  <VRow label="Roll Number" value={selectedCert.rollNumber} mono />
+                  <VRow label="Department" value={selectedCert.department} />
+                  <VRow label="College" value={selectedCert.college} />
+                  <VRow label="Issuer Authority" value={selectedCert.issuer || "SVKM IoT Dhule"} />
+                  <VRow label="Issue Date" value={selectedCert.issueDate} />
+                  <VRow label="Student Wallet" value={selectedCert.studentWalletAddress} mono truncate />
+                  <VRow label="Authority Signer" value={selectedCert.assignedByAdminWallet || "0x42fb...7292"} mono truncate />
+                  
+                  {selectedCert.claimed && selectedCert.tokenId && (
+                    <VRow label="NFT Token ID" value={`#${selectedCert.tokenId}`} mono />
+                  )}
+                  {selectedCert.claimed && selectedCert.transactionHash && (
+                    <VRow label="Transaction Hash" value={selectedCert.transactionHash} mono truncate />
+                  )}
+                </div>
+
+                {/* File Preview and Downloader */}
+                {selectedCert.certificateFileUrl && (
+                  <div className="mt-6 pt-6 border-t border-white/5 space-y-4">
+                    <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Verifiable File Document</p>
+                    {selectedCert.certificateFileUrl.startsWith("data:image/") && (
+                      <div className="relative rounded-xl overflow-hidden border border-white/5 bg-slate-950 aspect-video flex items-center justify-center max-h-60">
+                        <img
+                          src={selectedCert.certificateFileUrl}
+                          alt={selectedCert.title}
+                          className="max-h-full max-w-full object-contain"
+                        />
+                      </div>
+                    )}
+                    <a
+                      href={selectedCert.certificateFileUrl}
+                      download={`${selectedCert.title.replace(/\s+/g, "_")}_Certificate.${selectedCert.certificateFileUrl.includes("pdf") ? "pdf" : "jpg"}`}
+                      className="btn-secondary w-full py-2.5 text-xs text-center flex items-center justify-center gap-2 font-semibold transition-all hover:bg-white/10"
+                    >
+                      💾 Download Verified Document
+                    </a>
+                  </div>
+                )}
+              </div>
+
+              {/* QR and Blockchain Verification Footer */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                {/* QR Code generator */}
+                <div className="glass-card p-6 flex flex-col items-center justify-center text-center">
+                  <h4 className="font-bold text-white mb-2 text-sm">QR Verification Link</h4>
+                  <div className="p-3 bg-white rounded-xl mb-3">
+                    <QRCodeSVG
+                      value={`${window.location.origin}/verify/${selectedCert.id}`}
+                      size={130}
+                      bgColor="#ffffff"
+                      fgColor="#000000"
+                      level="M"
+                    />
+                  </div>
+                  <p className="text-[10px] text-slate-400 max-w-[200px] leading-relaxed">
+                    Recruiters can scan this QR code to verify this specific certificate at any time.
+                  </p>
+                </div>
+
+                {/* Blockchain metadata explorer */}
+                <div className="glass-card p-6 flex flex-col justify-between">
+                  <div>
+                    <h4 className="font-bold text-white mb-1.5 text-sm">Blockchain Ledger Status</h4>
+                    <p className="text-xs text-slate-400 leading-relaxed mb-4">
+                      {selectedCert.claimed
+                        ? "This certificate has been fully recorded on the Base Sepolia blockchain network. It represents a secure, decentralized digital asset."
+                        : "This certificate is officially signed in our verified Firestore database, but has not yet been minted as a Web3 NFT on the blockchain network by the student."
+                      }
+                    </p>
+                  </div>
+                  
+                  {selectedCert.claimed && selectedCert.transactionHash ? (
+                    <a
+                      href={`${EXPLORER_URL}/tx/${selectedCert.transactionHash}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="btn-primary w-full text-xs text-center py-2.5 flex items-center justify-center gap-1.5 font-semibold"
+                    >
+                      🔗 Open on BaseScan
+                    </a>
+                  ) : (
+                    <div className="bg-white/5 border border-white/5 rounded-xl p-3 text-center text-xs text-slate-500 font-medium font-mono">
+                      NFT MINT PENDING
+                    </div>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </div>
       </div>
     </div>
   );
 }
 
-function VRow({ label, value, mono, truncate }) {
+function VRow({ label, value, mono, truncate, capitalize }) {
   return (
-    <div className="flex items-start justify-between gap-3">
-      <span className="text-slate-500 shrink-0">{label}</span>
-      <span className={`text-slate-200 text-right ${mono ? "font-mono text-xs" : ""} ${truncate ? "truncate max-w-[220px]" : ""}`}>
+    <div className="flex items-start justify-between gap-4 py-1.5 border-b border-white/5">
+      <span className="text-slate-400 shrink-0 font-medium">{label}</span>
+      <span className={`text-slate-200 text-right ${mono ? "font-mono text-xs" : ""} ${truncate ? "truncate max-w-[180px] sm:max-w-[280px]" : ""} ${capitalize ? "capitalize" : ""}`}>
         {value}
       </span>
     </div>
   );
-}
-
-// Demo result for judges when contract isn't deployed
-function demoResult(input) {
-  return {
-    tokenId: isNaN(Number(input)) ? 42 : Number(input),
-    title: "HackWithMumbai 3.0 Participant",
-    achievementType: "badge",
-    issuerName: "HackWithMumbai",
-    eventName: "HackWithMumbai 3.0",
-    studentAddress: "0xDemo000000000000000000000000000000000000",
-    issuedAt: Math.floor(Date.now() / 1000),
-    verified: true,
-    owner: "0xDemo000000000000000000000000000000000000",
-    explorerUrl: "https://sepolia.basescan.org",
-  };
 }

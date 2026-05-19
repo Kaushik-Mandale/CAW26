@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { useWallet } from "../context/WalletContext";
+import { useAuth } from "../context/AuthContext";
 import { UGFBadge } from "./UGFBadge";
 
 const NAV_LINKS = [
@@ -23,8 +24,16 @@ export default function Navbar() {
     switchToBaseSepolia,
   } = useWallet();
 
+  const { user } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
   const navigate = useNavigate();
+
+  const visibleLinks = NAV_LINKS.filter((link) => {
+    if (link.to === "/admin") {
+      return user && user.role === "admin";
+    }
+    return true;
+  });
 
   const handleConnect = async () => {
     const success = await connectWallet();
@@ -80,7 +89,7 @@ export default function Navbar() {
 
         {/* Desktop Navigation */}
         <div className="hidden md:flex items-center gap-1">
-          {NAV_LINKS.map((link) => (
+          {visibleLinks.map((link) => (
             <NavLink
               key={link.to}
               to={link.to}
@@ -164,9 +173,92 @@ export default function Navbar() {
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.25, ease: "easeInOut" }}
             className="md:hidden border-t border-white/5 bg-zinc-950/95 backdrop-blur-xl"
           >
-            {/* Mobile menu content */}
+            <div className="px-4 py-4 space-y-4">
+              {/* Links */}
+              <div className="flex flex-col gap-1">
+                {visibleLinks.map((link) => (
+                  <NavLink
+                    key={link.to}
+                    to={link.to}
+                    onClick={() => setMobileOpen(false)}
+                    className={({ isActive }) =>
+                      `flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${isActive
+                        ? "bg-indigo-500/20 text-indigo-400 border border-indigo-500/30"
+                        : "text-slate-400 hover:text-white hover:bg-white/5"
+                      }`
+                    }
+                  >
+                    <span className="text-base">{link.icon}</span>
+                    <span>{link.label}</span>
+                  </NavLink>
+                ))}
+              </div>
+
+              {/* UGF Badge */}
+              <div className="pt-2 pb-1 border-t border-white/5 flex items-center justify-between">
+                <span className="text-xs text-slate-500 font-medium">Protocol Standard</span>
+                <UGFBadge size="sm" />
+              </div>
+
+              {/* Wrong Network Warning */}
+              {isConnected && !isCorrectChain && (
+                <motion.button
+                  onClick={() => {
+                    switchToBaseSepolia();
+                    setMobileOpen(false);
+                  }}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold bg-amber-500/20 border border-amber-500/30 text-amber-400 hover:bg-amber-500/30 transition-all"
+                  whileHover={{ scale: 1.01 }}
+                >
+                  ⚠️ Switch to Base Sepolia
+                </motion.button>
+              )}
+
+              {/* Wallet Info / Connection Status */}
+              <div className="pt-3 border-t border-white/5">
+                {isConnected ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between px-4 py-3 rounded-xl bg-slate-900 border border-slate-800">
+                      <div className="flex items-center gap-2 text-sm font-medium text-slate-300">
+                        <div className="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-pulse" />
+                        Connected
+                      </div>
+                      <span className="text-xs font-mono text-slate-400 select-all bg-white/5 px-2 py-0.5 rounded">
+                        {shortAddress}
+                      </span>
+                    </div>
+
+                    <motion.button
+                      onClick={() => {
+                        handleDisconnect();
+                        setMobileOpen(false);
+                      }}
+                      whileHover={{ scale: 1.01 }}
+                      whileTap={{ scale: 0.99 }}
+                      className="w-full py-3 rounded-xl text-sm font-semibold bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/25 transition-all text-center"
+                    >
+                      Disconnect Wallet
+                    </motion.button>
+                  </div>
+                ) : (
+                  <motion.button
+                    onClick={() => {
+                      handleConnect();
+                      setMobileOpen(false);
+                    }}
+                    disabled={isConnecting}
+                    whileHover={{ scale: 1.01 }}
+                    whileTap={{ scale: 0.99 }}
+                    className="w-full btn-primary text-sm py-3 px-6 flex items-center justify-center gap-2 font-semibold"
+                  >
+                    {isConnecting ? "Connecting..." : "🦊 Connect Wallet"}
+                  </motion.button>
+                )}
+              </div>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

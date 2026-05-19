@@ -20,4 +20,11 @@ export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const storage = getStorage(app);
 
+try {
+  storage.maxUploadRetryTime = 10000; // 10 seconds max retry for uploads
+  storage.maxOperationRetryTime = 10000; // 10 seconds max retry for other operations
+} catch (e) {
+  console.warn("Could not set Firebase Storage retry limits:", e);
+}
+
 export default app;
