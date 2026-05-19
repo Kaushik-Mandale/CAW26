@@ -5,21 +5,56 @@ import { useWallet } from "../context/WalletContext";
 import { UGFBadge } from "./UGFBadge";
 
 const NAV_LINKS = [
-  { to: "/",             label: "Home",          icon: "🏠" },
-  { to: "/dashboard",   label: "Dashboard",     icon: "📊" },
-  { to: "/achievements",label: "Achievements",  icon: "🏆" },
-  { to: "/verify",      label: "Verify",        icon: "🔍" },
-  { to: "/admin",       label: "Admin",         icon: "⚙️" },
+  { to: "/", label: "Home", icon: "🏠" },
+  { to: "/dashboard", label: "Dashboard", icon: "📊" },
+  { to: "/achievements", label: "Achievements", icon: "🏆" },
+  { to: "/verify", label: "Verify", icon: "🔍" },
+  { to: "/admin", label: "Admin", icon: "⚙️" },
 ];
 
 export default function Navbar() {
-  const { address, shortAddress, isConnected, isConnecting, connectWallet, disconnectWallet, isCorrectChain, switchToBaseSepolia } = useWallet();
+  const {
+    shortAddress,
+    isConnected,
+    isConnecting,
+    connectWallet,
+    disconnectWallet,
+    isCorrectChain,
+    switchToBaseSepolia,
+  } = useWallet();
+
   const [mobileOpen, setMobileOpen] = useState(false);
   const navigate = useNavigate();
 
   const handleConnect = async () => {
-    const ok = await connectWallet();
-    if (ok) navigate("/dashboard");
+    const success = await connectWallet();
+
+    if (success) {
+      localStorage.setItem("walletConnected", "true");
+      navigate("/dashboard");
+    }
+  };
+
+  const handleDisconnect = async () => {
+    try {
+      if (disconnectWallet) {
+        await disconnectWallet();
+      }
+
+      // Remove saved wallet session
+      localStorage.removeItem("walletConnected");
+
+      // Clear wallet-related cache
+      localStorage.removeItem("wagmi.wallet");
+      localStorage.removeItem("walletconnect");
+
+      sessionStorage.clear();
+
+      // Force reload
+      window.location.href = "/";
+    } catch (error) {
+      console.error("Disconnect failed:", error);
+    }
   };
 
   return (
@@ -31,23 +66,28 @@ export default function Navbar() {
           <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-lg shadow-glow-brand group-hover:shadow-glow-purple transition-all">
             🎓
           </div>
+
           <div className="hidden sm:block">
-            <p className="font-display font-bold text-sm gradient-text leading-none">Campus</p>
-            <p className="font-display font-bold text-sm text-slate-300 leading-none">Achievement Wallet</p>
+            <p className="font-display font-bold text-sm gradient-text leading-none">
+              Campus
+            </p>
+
+            <p className="font-display font-bold text-sm text-slate-300 leading-none">
+              Achievement Wallet
+            </p>
           </div>
         </Link>
 
-        {/* Desktop Nav */}
+        {/* Desktop Navigation */}
         <div className="hidden md:flex items-center gap-1">
-          {NAV_LINKS.map(link => (
+          {NAV_LINKS.map((link) => (
             <NavLink
               key={link.to}
               to={link.to}
               className={({ isActive }) =>
-                `px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-                  isActive
-                    ? "bg-indigo-500/20 text-indigo-400 border border-indigo-500/30"
-                    : "text-slate-400 hover:text-white hover:bg-white/5"
+                `px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${isActive
+                  ? "bg-indigo-500/20 text-indigo-400 border border-indigo-500/30"
+                  : "text-slate-400 hover:text-white hover:bg-white/5"
                 }`
               }
             >
@@ -56,13 +96,15 @@ export default function Navbar() {
           ))}
         </div>
 
-        {/* Right side: UGF badge + wallet */}
-        <div className="flex items-center gap-2">
+        {/* Right Side */}
+        <div className="flex items-center gap-3">
+
+          {/* UGF Badge */}
           <div className="hidden lg:block">
             <UGFBadge />
           </div>
 
-          {/* Chain warning */}
+          {/* Wrong Network Warning */}
           {isConnected && !isCorrectChain && (
             <motion.button
               onClick={switchToBaseSepolia}
@@ -73,80 +115,58 @@ export default function Navbar() {
             </motion.button>
           )}
 
-          {/* Wallet button */}
+          {/* Wallet Status */}
           {isConnected ? (
-            <div className="flex items-center gap-2">
-              <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
-                <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                <span className="text-xs font-mono text-emerald-300">{shortAddress}</span>
+            <div className="flex items-center gap-3">
+
+              {/* Wallet Address */}
+              <div className="hidden sm:flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-sm">
+                <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
+                {shortAddress}
               </div>
+
+              {/* Disconnect Button */}
               <motion.button
-                onClick={disconnectWallet}
-                whileHover={{ scale: 1.02 }}
-                className="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-400 hover:text-white hover:bg-white/5 transition-all border border-white/10"
+                onClick={handleDisconnect}
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.97 }}
+                className="px-4 py-2 rounded-xl text-sm font-medium bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 transition-all"
               >
                 Disconnect
               </motion.button>
             </div>
           ) : (
             <motion.button
-              id="navbar-connect-wallet"
               onClick={handleConnect}
               disabled={isConnecting}
               whileHover={{ scale: 1.03 }}
               whileTap={{ scale: 0.97 }}
-              className="btn-primary text-sm py-2 px-4"
+              className="btn-primary text-sm py-2.5 px-6 flex items-center gap-2"
             >
-              {isConnecting ? (
-                <span className="flex items-center gap-2">
-                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  Connecting…
-                </span>
-              ) : (
-                "🦊 Connect Wallet"
-              )}
+              {isConnecting ? "Connecting..." : "🦊 Connect Wallet"}
             </motion.button>
           )}
 
-          {/* Mobile hamburger */}
+          {/* Mobile Hamburger */}
           <button
-            id="navbar-mobile-menu"
             className="md:hidden p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/5"
-            onClick={() => setMobileOpen(v => !v)}
+            onClick={() => setMobileOpen((v) => !v)}
           >
             {mobileOpen ? "✕" : "☰"}
           </button>
         </div>
       </div>
 
-      {/* Mobile menu */}
+      {/* Mobile Menu */}
       <AnimatePresence>
         {mobileOpen && (
           <motion.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            className="md:hidden border-t border-white/5 bg-dark-900/95 backdrop-blur-xl"
+            className="md:hidden border-t border-white/5 bg-zinc-950/95 backdrop-blur-xl"
           >
-            <div className="px-4 py-3 flex flex-col gap-1">
-              {NAV_LINKS.map(link => (
-                <NavLink
-                  key={link.to}
-                  to={link.to}
-                  onClick={() => setMobileOpen(false)}
-                  className={({ isActive }) =>
-                    `flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${
-                      isActive ? "bg-indigo-500/20 text-indigo-400" : "text-slate-400"
-                    }`
-                  }
-                >
-                  <span>{link.icon}</span>{link.label}
-                </NavLink>
-              ))}
-              <div className="mt-2 pt-2 border-t border-white/5 flex flex-wrap gap-2">
-                <UGFBadge /><span className="badge-success">✅ No ETH</span>
-              </div>
-            </div>
+            {/* Mobile menu content */}
           </motion.div>
         )}
       </AnimatePresence>
