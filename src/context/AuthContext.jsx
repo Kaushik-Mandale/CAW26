@@ -2,15 +2,15 @@ import { createContext, useContext, useState, useEffect } from "react";
 import { useWallet } from "./WalletContext";
 import { db } from "../config/firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
+import { ensureDemoCertificateForUser } from "../utils/demoCertificate";
 
 const AuthContext = createContext();
 
 export const useAuth = () => useContext(AuthContext);
 
-// Case-insensitive admin wallet list including the primary authority address
 export const ADMIN_WALLETS = [
-  "0x42fb24C49e66e9050D8569135e69fB908e1f7292", // College Authority admin address
-  "0x220e790D10f3413a1b2Ead1f124ca2Fa497b8306", // Contract/deployer address
+  "0x42fb24C49e66e9050D8569135e69fB908e1f7292",
+  "0x220e790D10f3413a1b2Ead1f124ca2Fa497b8306",
   "0x0000000000000000000000000000000000000000",
 ];
 
@@ -19,54 +19,64 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Checks Firebase for the profile matching a wallet address
   const checkUserProfile = async (walletAddress) => {
     setLoading(true);
+
     try {
       const lowerAddress = walletAddress.toLowerCase();
       const docRef = doc(db, "users", lowerAddress);
-      
+
       const isAdmin = ADMIN_WALLETS.some(
         (w) => w.toLowerCase() === lowerAddress
       );
 
-      // Auto-provision College Authority Admin Profile in Firebase
-      if (lowerAddress === "0x42fb24c49e66e9050d8569135e69fb908e1f7292".toLowerCase()) {
+      if (
+        lowerAddress ===
+        "0x42fb24c49e66e9050d8569135e69fb908e1f7292"
+      ) {
         const adminProfile = {
           role: "admin",
-          walletAddress: "0x42fb24C49e66e9050D8569135e69fB908e1f7292",
+          walletAddress: walletAddress,
           name: "College Authority",
           department: "Administration",
           college: "SVKM IoT Dhule",
           createdAt: new Date().toISOString(),
         };
 
-        // Write or merge profile in Firestore users/0x42fb...
         await setDoc(docRef, adminProfile, { merge: true });
 
-        setUser({
+        const finalUser = {
           uid: lowerAddress,
           ...adminProfile,
           profileCompleted: true,
-        });
+        };
+
+        setUser(finalUser);
+        await ensureDemoCertificateForUser(finalUser);
         return;
       }
 
-      // Check standard profile in Firestore
       const docSnap = await getDoc(docRef);
 
       if (docSnap.exists()) {
         const data = docSnap.data();
-        const role = isAdmin || data.role === "admin" ? "admin" : (data.role || "student");
-        setUser({
+
+        const role =
+          isAdmin || data.role === "admin"
+            ? "admin"
+            : data.role || "student";
+
+        const finalUser = {
           uid: lowerAddress,
           walletAddress: walletAddress,
           ...data,
-          role: role,
+          role,
           profileCompleted: true,
-        });
+        };
+
+        setUser(finalUser);
+        await ensureDemoCertificateForUser(finalUser);
       } else {
-        // Connected but profile not completed (student default)
         setUser({
           uid: lowerAddress,
           walletAddress: walletAddress,
@@ -76,7 +86,7 @@ export const AuthProvider = ({ children }) => {
       }
     } catch (error) {
       console.error("Error fetching user profile from Firebase:", error);
-      // Fallback
+
       setUser({
         uid: walletAddress.toLowerCase(),
         walletAddress: walletAddress,
@@ -88,19 +98,19 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // Complete profile and save to Firebase
   const completeProfile = async (profileData) => {
     if (!address) throw new Error("No wallet connected");
 
     setLoading(true);
+
     try {
       const lowerAddress = address.toLowerCase();
       const userRef = doc(db, "users", lowerAddress);
-      
+
       const isAdmin = ADMIN_WALLETS.some(
         (w) => w.toLowerCase() === lowerAddress
       );
-      
+
       const role = isAdmin ? "admin" : "student";
 
       const newProfile = {
@@ -111,17 +121,20 @@ export const AuthProvider = ({ children }) => {
         email: profileData.email || "",
         studentId: profileData.studentId || "",
         walletAddress: address,
-        role: role,
+        role,
         createdAt: new Date().toISOString(),
       };
 
       await setDoc(userRef, newProfile);
 
-      setUser({
+      const finalUser = {
         uid: lowerAddress,
         ...newProfile,
         profileCompleted: true,
-      });
+      };
+
+      setUser(finalUser);
+      await ensureDemoCertificateForUser(finalUser);
 
       return true;
     } catch (error) {
@@ -147,7 +160,9 @@ export const AuthProvider = ({ children }) => {
   }, [address, isConnected, isConnecting]);
 
   return (
-    <AuthContext.Provider value={{ user, loading, completeProfile, checkUserProfile }}>
+    <AuthContext.Provider
+      value={{ user, loading, completeProfile, checkUserProfile }}
+    >
       {children}
     </AuthContext.Provider>
   );
