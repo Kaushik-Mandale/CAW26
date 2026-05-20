@@ -15,7 +15,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <WalletProvider>
       <AuthProvider>
-        <UGFProvider>
+        <UGFProvider mode="testnet">
           <AchievementProvider>
             <BrowserRouter>
               <App />

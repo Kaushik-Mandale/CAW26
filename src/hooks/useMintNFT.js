@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { ethers } from "ethers";
 import { useUGFModal } from "@tychilabs/react-ugf";
 import { CONTRACT_ADDRESS, CONTRACT_ABI, CHAIN_ID } from "../config/contract";
@@ -6,174 +6,258 @@ import { useWallet } from "../context/WalletContext";
 import { useAchievement } from "../context/AchievementContext";
 import toast from "react-hot-toast";
 
-/**
- * useMintNFT — Core UGF gasless minting hook
- *
- * Flow:
- *  1. Build NFT metadata as base64 JSON
- *  2. Encode mintAchievement() calldata
- *  3. Call openUGF() → UGF modal opens
- *  4. User pays with Mock USD — no ETH needed
- *  5. UGF sponsors gas, mint executes on Base Sepolia
- *  6. On success, save to Firestore and return tx details
- */
 export function useMintNFT() {
   const { signer, address, isConnected } = useWallet();
   const { saveMintedNFT } = useAchievement();
-  const { openUGF } = useUGFModal();
+  const { openUGF, result: ugfResult } = useUGFModal();
 
-  const [isMinting, setIsMinting]   = useState(false);
+  const [activeAchievement, setActiveAchievement] = useState(null);
+  const [isMinting, setIsMinting] = useState(false);
   const [mintResult, setMintResult] = useState(null);
-  const [mintError, setMintError]   = useState(null);
+  const [mintError, setMintError] = useState(null);
 
-  /**
-   * Build base64-encoded JSON metadata for the NFT
-   */
+  const [processedTxHash, setProcessedTxHash] = useState(null);
+  const [expectedTxStarted, setExpectedTxStarted] = useState(false);
+
   const buildTokenURI = useCallback((achievement, studentAddr) => {
     const svgCard = generateCertificateSVG(achievement, studentAddr);
     const svgBase64 = btoa(unescape(encodeURIComponent(svgCard)));
 
     const metadata = {
       name: achievement.title,
-      description: achievement.description,
+      description: achievement.description || achievement.title,
       image: `data:image/svg+xml;base64,${svgBase64}`,
       attributes: [
-        { trait_type: "Type",        value: achievement.type },
-        { trait_type: "Issuer",      value: achievement.issuerName },
-        { trait_type: "Event",       value: achievement.eventName },
-        { trait_type: "Rarity",      value: achievement.rarity || "Common" },
-        { trait_type: "Points",      value: achievement.points || 0 },
-        { trait_type: "Network",     value: "Base Sepolia" },
-        { trait_type: "Gas Method",  value: "UGF Gasless" },
+        { trait_type: "Type", value: achievement.type },
+        { trait_type: "Issuer", value: achievement.issuerName },
+        { trait_type: "Event", value: achievement.eventName },
+        { trait_type: "Rarity", value: achievement.rarity || "Common" },
+        { trait_type: "Points", value: achievement.points || 0 },
+        { trait_type: "Network", value: "Base Sepolia" },
+        { trait_type: "Gas Method", value: "UGF Gasless" },
         { trait_type: "Issued Date", value: new Date().toISOString() },
       ],
     };
 
-    const metaStr  = JSON.stringify(metadata);
-    const metaB64  = btoa(unescape(encodeURIComponent(metaStr)));
+    const metaStr = JSON.stringify(metadata);
+    const metaB64 = btoa(unescape(encodeURIComponent(metaStr)));
     return `data:application/json;base64,${metaB64}`;
   }, []);
 
-  /**
-   * Mint NFT using UGF gasless transaction
-   */
   const mintNFT = useCallback(async (achievement) => {
     if (!isConnected || !signer) {
       setMintError("Please connect your wallet first.");
       return null;
     }
 
-    setIsMinting(true);
     setMintError(null);
     setMintResult(null);
 
     try {
-      // 🔒 Security Validation: Address Boundary Check
       if (
         !achievement.studentWalletAddress ||
         achievement.studentWalletAddress.toLowerCase() !== address.toLowerCase()
       ) {
-        throw new Error(
-          "Unauthorized: This certificate is not assigned to your connected wallet address."
-        );
+        throw new Error("Unauthorized: This certificate is not assigned to your connected wallet address.");
       }
 
-      // 🔒 Security Validation: Duplicate Claims Check
       if (achievement.claimed) {
         throw new Error("This certificate has already been claimed as an NFT proof.");
       }
 
-      const tokenURI = buildTokenURI(achievement, address);
-
-      // Encode the smart contract call
       const iface = new ethers.Interface(CONTRACT_ABI);
       const calldata = iface.encodeFunctionData("mintAchievement", [
         address,
-        tokenURI,
+        buildTokenURI(achievement, address),
         achievement.title,
         achievement.type,
         achievement.issuerName,
         achievement.eventName,
       ]);
 
-      // ⚡ UGF gasless transaction — no ETH required!
-      const result = await openUGF({
+      setActiveAchievement(achievement);
+      setIsMinting(true);
+      setExpectedTxStarted(true);
+
+      await openUGF({
         signer,
         tx: {
-          to:    CONTRACT_ADDRESS,
-          data:  calldata,
+          to: CONTRACT_ADDRESS,
+          data: calldata,
           value: 0n,
         },
-        destChainId: String(CHAIN_ID), // "84532" — Base Sepolia
+        destChainId: String(CHAIN_ID),
+      });
+    } catch (err) {
+      const msg = err?.message || "Failed to open transaction modal. Please try again.";
+      setMintError(msg);
+      setIsMinting(false);
+      setActiveAchievement(null);
+      setExpectedTxStarted(false);
+      console.error("Mint initiation error:", err);
+    }
+  }, [isConnected, signer, address, openUGF, buildTokenURI]);
+
+  useEffect(() => {
+    if (
+      !expectedTxStarted ||
+      !ugfResult ||
+      !ugfResult.txHash ||
+      !activeAchievement ||
+      !signer
+    ) {
+      return;
+    }
+
+    if (ugfResult.txHash === processedTxHash) {
+      return;
+    }
+
+    let isSubscribed = true;
+
+    const finalizeClaim = async () => {
+      const txHash = ugfResult.txHash;
+
+      setProcessedTxHash(txHash);
+      setIsMinting(true);
+
+      toast.loading("Verifying blockchain transaction...", {
+        id: "ugf-mint-confirm",
       });
 
-      const txHash  = result?.txHash || result?.transactionHash || "demo_" + Date.now();
+      try {
+        let receipt = null;
 
-      // 🔒 Robust Security: Wait for transaction mining/confirmation on blockchain
-      if (txHash && !txHash.startsWith("demo_") && signer.provider) {
-        toast.loading("Verifying blockchain transaction...", { id: "ugf-mint-confirm" });
-        try {
-          const receipt = await signer.provider.waitForTransaction(txHash);
-          toast.dismiss("ugf-mint-confirm");
+        if (signer.provider) {
+          receipt = await signer.provider.waitForTransaction(txHash);
+
           if (!receipt || receipt.status === 0) {
-            throw new Error("On-chain transaction execution failed or was reverted.");
+            throw new Error("On-chain transaction failed or was reverted.");
           }
-        } catch (confirmErr) {
-          toast.dismiss("ugf-mint-confirm");
-          throw new Error("Blockchain verification failed: " + (confirmErr?.message || "Transaction was rejected or failed."));
+        }
+
+        let tokenId = Date.now().toString();
+
+        try {
+          const iface = new ethers.Interface(CONTRACT_ABI);
+
+          for (const log of receipt?.logs || []) {
+            try {
+              const parsed = iface.parseLog(log);
+
+              if (
+                parsed?.name === "AchievementMinted" &&
+                parsed?.args?.tokenId
+              ) {
+                tokenId = parsed.args.tokenId.toString();
+                break;
+              }
+
+              if (
+                parsed?.name === "Transfer" &&
+                parsed?.args?.tokenId
+              ) {
+                tokenId = parsed.args.tokenId.toString();
+                break;
+              }
+            } catch {
+              // Ignore unrelated logs
+            }
+          }
+        } catch {
+          // Keep fallback tokenId
+        }
+
+        const tokenURI = buildTokenURI(activeAchievement, address);
+
+        const mintData = {
+          achievementId: activeAchievement.id,
+          title: activeAchievement.title,
+          type: activeAchievement.type,
+          issuerName: activeAchievement.issuerName,
+          eventName: activeAchievement.eventName,
+          txHash,
+          tokenId,
+          tokenURI,
+        };
+
+        if (isSubscribed) {
+          await saveMintedNFT(mintData);
+          setMintResult({ ...mintData, achievement: activeAchievement });
+          toast.success("NFT Claimed Successfully!", {
+            id: "ugf-mint-confirm",
+          });
+        }
+      } catch (err) {
+        console.error("On-chain verification error:", err);
+
+        if (isSubscribed) {
+          setMintError(err?.message || "Blockchain transaction failed.");
+          toast.error(err?.message || "Transaction failed.", {
+            id: "ugf-mint-confirm",
+          });
+        }
+      } finally {
+        if (isSubscribed) {
+          setIsMinting(false);
+          setActiveAchievement(null);
+          setExpectedTxStarted(false);
         }
       }
+    };
 
-      const tokenId = result?.tokenId ?? Math.floor(Math.random() * 10000);
+    finalizeClaim();
 
-      const mintData = {
-        achievementId: achievement.id,
-        title:         achievement.title,
-        type:          achievement.type,
-        issuerName:    achievement.issuerName,
-        eventName:     achievement.eventName,
-        txHash,
-        tokenId:       tokenId.toString(),
-        tokenURI,
-      };
-
-      await saveMintedNFT(mintData);
-      setMintResult({ ...mintData, achievement });
-      return mintData;
-    } catch (err) {
-      const msg = err?.message || "Transaction failed. Please try again.";
-      setMintError(msg);
-      console.error("Mint error:", err);
-      return null;
-    } finally {
-      setIsMinting(false);
-    }
-  }, [isConnected, signer, address, openUGF, buildTokenURI, saveMintedNFT]);
+    return () => {
+      isSubscribed = false;
+    };
+  }, [
+    expectedTxStarted,
+    ugfResult,
+    activeAchievement,
+    processedTxHash,
+    signer,
+    address,
+    buildTokenURI,
+    saveMintedNFT,
+  ]);
 
   const resetMint = useCallback(() => {
     setMintResult(null);
     setMintError(null);
+    setIsMinting(false);
+    setActiveAchievement(null);
+    setExpectedTxStarted(false);
   }, []);
 
   return { mintNFT, isMinting, mintResult, mintError, resetMint };
 }
 
-/**
- * Generate a beautiful SVG certificate card for the NFT
- */
 function generateCertificateSVG(achievement, studentAddr) {
   const typeColors = {
     certificate: { bg: "#1e1b4b", accent: "#818cf8", border: "#6366f1" },
-    badge:       { bg: "#1c1a0e", accent: "#fbbf24", border: "#f59e0b" },
-    reward:      { bg: "#0d1f2d", accent: "#34d399", border: "#10b981" },
+    badge: { bg: "#1c1a0e", accent: "#fbbf24", border: "#f59e0b" },
+    reward: { bg: "#0d1f2d", accent: "#34d399", border: "#10b981" },
   };
+
   const colors = typeColors[achievement.type] || typeColors.certificate;
+
   const date = new Date().toLocaleDateString("en-US", {
-    year: "numeric", month: "long", day: "numeric",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
   });
+
   const shortAddr = studentAddr
     ? `${studentAddr.slice(0, 8)}...${studentAddr.slice(-6)}`
     : "0x...";
+
+  const safeDescription = achievement.description || achievement.title || "";
+  const safeTitle = achievement.title || "Achievement";
+  const safeType = achievement.type || "certificate";
+  const safeEvent = achievement.eventName || safeTitle;
+  const safeIssuer = achievement.issuerName || "SVKM IoT Dhule";
+  const safeImage = achievement.image || "🎓";
 
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 300" width="500" height="300">
   <defs>
@@ -185,45 +269,40 @@ function generateCertificateSVG(achievement, studentAddr) {
       <stop offset="0%" style="stop-color:${colors.border};stop-opacity:1"/>
       <stop offset="100%" style="stop-color:${colors.accent};stop-opacity:1"/>
     </linearGradient>
-    <filter id="glow">
-      <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
-      <feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>
-    </filter>
   </defs>
-  <!-- Background -->
+
   <rect width="500" height="300" fill="url(#bg)" rx="16"/>
-  <!-- Border -->
   <rect x="2" y="2" width="496" height="296" fill="none" stroke="url(#accent)" stroke-width="2" rx="15" opacity="0.8"/>
-  <!-- Top accent bar -->
   <rect x="20" y="20" width="460" height="4" fill="url(#accent)" rx="2"/>
-  <!-- Icon / Emoji -->
-  <text x="40" y="90" font-size="48" font-family="Segoe UI Emoji,Apple Color Emoji,sans-serif">${achievement.image}</text>
-  <!-- Title -->
-  <text x="110" y="75" font-size="18" font-weight="700" fill="${colors.accent}" font-family="Arial,sans-serif" filter="url(#glow)">${achievement.title}</text>
-  <!-- Subtitle -->
-  <text x="110" y="98" font-size="11" fill="#9ca3af" font-family="Arial,sans-serif">${achievement.type.toUpperCase()} · ${achievement.eventName}</text>
-  <!-- Divider -->
+
+  <text x="40" y="90" font-size="48" font-family="Segoe UI Emoji,Apple Color Emoji,sans-serif">${safeImage}</text>
+  <text x="110" y="75" font-size="18" font-weight="700" fill="${colors.accent}" font-family="Arial,sans-serif">${safeTitle.slice(0, 32)}</text>
+  <text x="110" y="98" font-size="11" fill="#9ca3af" font-family="Arial,sans-serif">${safeType.toUpperCase()} · ${safeEvent.slice(0, 32)}</text>
+
   <line x1="40" y1="120" x2="460" y2="120" stroke="${colors.accent}" stroke-width="0.5" opacity="0.4"/>
-  <!-- Description -->
-  <text x="40" y="145" font-size="10" fill="#d1d5db" font-family="Arial,sans-serif" text-anchor="start">
-    <tspan x="40" dy="0">${achievement.description.slice(0, 65)}</tspan>
-    <tspan x="40" dy="15">${achievement.description.slice(65, 120)}</tspan>
+
+  <text x="40" y="145" font-size="10" fill="#d1d5db" font-family="Arial,sans-serif">
+    <tspan x="40" dy="0">${safeDescription.slice(0, 65)}</tspan>
+    <tspan x="40" dy="15">${safeDescription.slice(65, 120)}</tspan>
   </text>
-  <!-- Info rows -->
+
   <text x="40" y="195" font-size="9" fill="#6b7280" font-family="monospace">ISSUER</text>
-  <text x="40" y="210" font-size="11" fill="#e5e7eb" font-family="Arial,sans-serif">${achievement.issuerName}</text>
+  <text x="40" y="210" font-size="11" fill="#e5e7eb" font-family="Arial,sans-serif">${safeIssuer.slice(0, 24)}</text>
+
   <text x="200" y="195" font-size="9" fill="#6b7280" font-family="monospace">DATE</text>
   <text x="200" y="210" font-size="11" fill="#e5e7eb" font-family="Arial,sans-serif">${date}</text>
+
   <text x="360" y="195" font-size="9" fill="#6b7280" font-family="monospace">NETWORK</text>
   <text x="360" y="210" font-size="11" fill="${colors.accent}" font-family="Arial,sans-serif">Base Sepolia</text>
-  <!-- Divider -->
+
   <line x1="40" y1="225" x2="460" y2="225" stroke="${colors.accent}" stroke-width="0.5" opacity="0.3"/>
-  <!-- Footer -->
+
   <text x="40" y="248" font-size="9" fill="#6b7280" font-family="monospace">WALLET</text>
   <text x="40" y="262" font-size="10" fill="#9ca3af" font-family="monospace">${shortAddr}</text>
-  <text x="360" y="255" font-size="9" fill="${colors.accent}" font-family="Arial,sans-serif" text-anchor="middle">⚡ Powered by UGF</text>
+
+  <text x="360" y="255" font-size="9" fill="${colors.accent}" font-family="Arial,sans-serif" text-anchor="middle">Powered by UGF</text>
   <text x="360" y="270" font-size="8" fill="#6b7280" font-family="Arial,sans-serif" text-anchor="middle">No ETH Required · Gasless</text>
-  <!-- Campus Achievement Wallet logo -->
+
   <text x="250" y="290" font-size="8" fill="#4b5563" font-family="Arial,sans-serif" text-anchor="middle">Campus Achievement Wallet · HackWithMumbai 3.0</text>
 </svg>`;
 }
