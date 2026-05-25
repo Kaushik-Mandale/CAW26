@@ -23,30 +23,35 @@ const sortOptions = [
   { value: "title-asc", label: "Sort: Title (A to Z)", icon: "🔤" }
 ];
 
+const getVerificationUrl = (achievement) => {
+  const id = achievement?.id || achievement?.certificateId;
+  return `${window.location.origin}/verify/${id}`;
+};
+
 export default function Achievements() {
   const { address } = useWallet();
-  const { availableAchievements, isClaimed } = useAchievement();
-  
-  const [selected, setSelected] = useState(null); // certificate to claim
-  const [selectedCertForQR, setSelectedCertForQR] = useState(null); // certificate for QR overlay modal
+  const { availableAchievements } = useAchievement();
+
+  const [selected, setSelected] = useState(null);
+  const [selectedCertForQR, setSelectedCertForQR] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
-  const [sortBy, setSortBy] = useState("newest"); // "newest", "oldest", "points-desc", "points-asc", "title-asc"
+  const [sortBy, setSortBy] = useState("newest");
   const [categoryOpen, setCategoryOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
 
-  // Filter and sort achievements dynamically
   const processedAchievements = [...availableAchievements]
-    .filter(a => {
+    .filter((a) => {
       const q = searchQuery.toLowerCase();
-      const matchesSearch = 
-        a.title.toLowerCase().includes(q) ||
-        (a.description && a.description.toLowerCase().includes(q)) ||
-        a.issuerName.toLowerCase().includes(q);
 
-      const matchesCategory = 
-        categoryFilter === "all" || 
-        a.category === categoryFilter || 
+      const matchesSearch =
+        a.title?.toLowerCase().includes(q) ||
+        a.description?.toLowerCase().includes(q) ||
+        a.issuerName?.toLowerCase().includes(q);
+
+      const matchesCategory =
+        categoryFilter === "all" ||
+        a.category === categoryFilter ||
         a.type === categoryFilter;
 
       return matchesSearch && matchesCategory;
@@ -70,13 +75,11 @@ export default function Achievements() {
       return 0;
     });
 
-  // Partition certificates into Pending and Claimed
-  const pendingCertificates = processedAchievements.filter(a => !a.claimed);
-  const claimedCertificates = processedAchievements.filter(a => a.claimed);
+  const pendingCertificates = processedAchievements.filter((a) => !a.claimed);
+  const claimedCertificates = processedAchievements.filter((a) => a.claimed);
 
   return (
     <div className="min-h-screen bg-slate-950 bg-mesh pt-20 pb-12">
-      {/* Click-outside backdrop overlay */}
       {(categoryOpen || sortOpen) && (
         <div
           className="fixed inset-0 z-20 cursor-default"
@@ -88,8 +91,6 @@ export default function Achievements() {
       )}
 
       <div className="max-w-6xl mx-auto px-4 sm:px-6">
-
-        {/* Header */}
         <motion.div
           className="mb-8"
           initial={{ opacity: 0, y: -10 }}
@@ -103,15 +104,12 @@ export default function Achievements() {
           </p>
         </motion.div>
 
-        {/* UGF Banner */}
         <div className="mb-8">
           <UGFBanner />
         </div>
 
-        {/* Filter and Sort Toolbar */}
         {availableAchievements.length > 0 && (
           <div className="glass-card p-5 mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4 border border-white/5 bg-slate-950/40 relative z-30">
-            {/* Search */}
             <div className="relative flex-1 max-w-md">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">🔍</span>
               <input
@@ -119,14 +117,12 @@ export default function Achievements() {
                 type="text"
                 placeholder="Search by title, issuer, or description..."
                 value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
+                onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full pl-9 pr-4 py-2.5 bg-white/5 border border-white/5 rounded-xl text-sm text-white placeholder-slate-500 outline-none focus:border-indigo-500/50 transition-all"
               />
             </div>
 
-            {/* Category Filter + Sort */}
             <div className="flex flex-wrap items-center gap-3 relative z-30">
-              {/* Category dropdown */}
               <div className="relative">
                 <button
                   type="button"
@@ -138,10 +134,13 @@ export default function Achievements() {
                   className="bg-slate-900/60 border border-white/5 rounded-xl px-4 py-2.5 text-xs text-slate-300 hover:text-white hover:border-indigo-500/30 flex items-center justify-between gap-2.5 transition-all duration-200 outline-none select-none min-w-[170px]"
                 >
                   <span className="flex items-center gap-1.5">
-                    {categories.find(c => c.value === categoryFilter)?.icon} {categories.find(c => c.value === categoryFilter)?.label}
+                    {categories.find((c) => c.value === categoryFilter)?.icon}{" "}
+                    {categories.find((c) => c.value === categoryFilter)?.label}
                   </span>
                   <svg
-                    className={`w-3 h-3 text-slate-400 transition-transform duration-300 ${categoryOpen ? "rotate-180 text-indigo-400" : ""}`}
+                    className={`w-3 h-3 text-slate-400 transition-transform duration-300 ${
+                      categoryOpen ? "rotate-180 text-indigo-400" : ""
+                    }`}
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -159,7 +158,7 @@ export default function Achievements() {
                       transition={{ duration: 0.15, ease: "easeOut" }}
                       className="absolute left-0 mt-2 min-w-[200px] bg-slate-950/95 border border-white/10 backdrop-blur-xl rounded-xl shadow-2xl p-1.5 z-40 flex flex-col gap-1 overflow-hidden"
                     >
-                      {categories.map(c => {
+                      {categories.map((c) => {
                         const isSelected = categoryFilter === c.value;
                         return (
                           <button
@@ -185,7 +184,6 @@ export default function Achievements() {
                 </AnimatePresence>
               </div>
 
-              {/* Sort dropdown */}
               <div className="relative">
                 <button
                   type="button"
@@ -197,10 +195,13 @@ export default function Achievements() {
                   className="bg-slate-900/60 border border-white/5 rounded-xl px-4 py-2.5 text-xs text-slate-300 hover:text-white hover:border-indigo-500/30 flex items-center justify-between gap-2.5 transition-all duration-200 outline-none select-none min-w-[200px]"
                 >
                   <span className="flex items-center gap-1.5">
-                    {sortOptions.find(o => o.value === sortBy)?.icon} {sortOptions.find(o => o.value === sortBy)?.label}
+                    {sortOptions.find((o) => o.value === sortBy)?.icon}{" "}
+                    {sortOptions.find((o) => o.value === sortBy)?.label}
                   </span>
                   <svg
-                    className={`w-3 h-3 text-slate-400 transition-transform duration-300 ${sortOpen ? "rotate-180 text-indigo-400" : ""}`}
+                    className={`w-3 h-3 text-slate-400 transition-transform duration-300 ${
+                      sortOpen ? "rotate-180 text-indigo-400" : ""
+                    }`}
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -218,7 +219,7 @@ export default function Achievements() {
                       transition={{ duration: 0.15, ease: "easeOut" }}
                       className="absolute right-0 mt-2 min-w-[220px] bg-slate-950/95 border border-white/10 backdrop-blur-xl rounded-xl shadow-2xl p-1.5 z-40 flex flex-col gap-1 overflow-hidden"
                     >
-                      {sortOptions.map(o => {
+                      {sortOptions.map((o) => {
                         const isSelected = sortBy === o.value;
                         return (
                           <button
@@ -247,7 +248,6 @@ export default function Achievements() {
           </div>
         )}
 
-        {/* General Empty State Guard */}
         {availableAchievements.length === 0 ? (
           <motion.div
             className="glass-card p-16 text-center border border-white/5 relative overflow-hidden"
@@ -263,8 +263,6 @@ export default function Achievements() {
           </motion.div>
         ) : (
           <div className="space-y-12">
-            
-            {/* SECTION 1: PENDING CERTIFICATES */}
             <div>
               <div className="flex items-center gap-2 mb-6">
                 <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
@@ -275,7 +273,7 @@ export default function Achievements() {
 
               {pendingCertificates.length === 0 ? (
                 <div className="p-8 text-center text-slate-500 text-sm glass-card border border-white/5 rounded-2xl bg-white/5">
-                  {searchQuery || categoryFilter !== "all" 
+                  {searchQuery || categoryFilter !== "all"
                     ? "🔍 No pending certificates matching your search filters."
                     : "🎉 Perfect! All assigned achievements have been claimed as blockchain NFTs."}
                 </div>
@@ -295,7 +293,6 @@ export default function Achievements() {
               )}
             </div>
 
-            {/* SECTION 2: CLAIMED NFT CERTIFICATES */}
             <div>
               <div className="flex items-center gap-2 mb-6">
                 <span className="h-2 w-2 rounded-full bg-emerald-500" />
@@ -308,7 +305,7 @@ export default function Achievements() {
                 <div className="p-8 text-center text-slate-500 text-sm glass-card border border-white/5 rounded-2xl bg-white/5">
                   {searchQuery || categoryFilter !== "all"
                     ? "🔍 No claimed NFTs matching your search filters."
-                    : "No certificates claimed as NFTs yet. Click \"Claim NFT\" on any pending certificate above to begin!"}
+                    : 'No certificates claimed as NFTs yet. Click "Claim NFT" on any pending certificate above to begin!'}
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -325,12 +322,10 @@ export default function Achievements() {
                 </div>
               )}
             </div>
-
           </div>
         )}
       </div>
 
-      {/* Claim Modal */}
       <AnimatePresence>
         {selected && (
           <ClaimModal
@@ -340,49 +335,55 @@ export default function Achievements() {
         )}
       </AnimatePresence>
 
-      {/* QR Code Overlay Modal */}
       <AnimatePresence>
         {selectedCertForQR && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
               className="glass-card max-w-sm w-full p-6 relative flex flex-col items-center text-center border border-white/10"
             >
-              <button 
+              <button
                 onClick={() => setSelectedCertForQR(null)}
                 className="absolute top-3 right-4 text-slate-400 hover:text-white transition-colors text-lg"
               >
                 ✕
               </button>
-              <h3 className="font-bold text-white mb-1.5 text-base font-display">Credential QR Verification</h3>
-              <p className="text-xs text-indigo-400 font-medium mb-4">{selectedCertForQR.title}</p>
-              
+
+              <h3 className="font-bold text-white mb-1.5 text-base font-display">
+                Credential QR Verification
+              </h3>
+
+              <p className="text-xs text-indigo-400 font-medium mb-4">
+                {selectedCertForQR.title}
+              </p>
+
               <div className="p-3 bg-white rounded-xl mb-4 shadow-xl">
                 <QRCodeSVG
-                  value={selectedCertForQR.verificationUrl || `${window.location.origin}/verify/${selectedCertForQR.id || selectedCertForQR.certificateId}`}
+                  value={getVerificationUrl(selectedCertForQR)}
                   size={150}
                   bgColor="#ffffff"
                   fgColor="#000000"
                   level="M"
                 />
               </div>
-              
+
               <p className="text-[10px] text-slate-400 mb-4 select-all bg-white/5 px-2.5 py-2 rounded-lg w-full break-all font-mono border border-white/5">
-                {selectedCertForQR.verificationUrl || `${window.location.origin}/verify/${selectedCertForQR.id || selectedCertForQR.certificateId}`}
+                {getVerificationUrl(selectedCertForQR)}
               </p>
 
               <div className="flex gap-2 w-full">
                 <button
                   onClick={() => {
-                    navigator.clipboard.writeText(selectedCertForQR.verificationUrl || `${window.location.origin}/verify/${selectedCertForQR.id || selectedCertForQR.certificateId}`);
+                    navigator.clipboard.writeText(getVerificationUrl(selectedCertForQR));
                     toast.success("Verification link copied!");
                   }}
                   className="btn-primary flex-1 py-2 text-xs font-semibold"
                 >
                   📋 Copy Link
                 </button>
+
                 <button
                   onClick={() => setSelectedCertForQR(null)}
                   className="btn-secondary flex-1 py-2 text-xs font-semibold"
@@ -399,9 +400,9 @@ export default function Achievements() {
 }
 
 function AchievementListCard({ achievement, claimed, index, onClaim, onShowQR }) {
-  const typeInfo   = ACHIEVEMENT_TYPES[achievement.type] || ACHIEVEMENT_TYPES.badge;
+  const typeInfo = ACHIEVEMENT_TYPES[achievement.type] || ACHIEVEMENT_TYPES.badge;
   const rarityColor = RARITY_COLORS[achievement.rarity] || "#9ca3af";
-  const verifyUrl = achievement.verificationUrl || `${window.location.origin}/verify/${achievement.id}`;
+  const verifyUrl = getVerificationUrl(achievement);
 
   return (
     <motion.div
@@ -413,42 +414,56 @@ function AchievementListCard({ achievement, claimed, index, onClaim, onShowQR })
       className="glass-card overflow-hidden group relative flex flex-col justify-between border border-white/5 bg-slate-950/40"
     >
       <div>
-        {/* Top gradient bar */}
         <div className={`h-1.5 w-full bg-gradient-to-r ${achievement.gradient}`} />
 
         <div className="p-5">
-          {/* Top row */}
           <div className="flex items-start justify-between mb-4">
             <div
               className="w-14 h-14 rounded-2xl flex items-center justify-center text-3xl"
-              style={{ background: `${achievement.color}15`, border: `1px solid ${achievement.color}30` }}
+              style={{
+                background: `${achievement.color}15`,
+                border: `1px solid ${achievement.color}30`
+              }}
             >
               {achievement.image}
             </div>
+
             <div className="flex flex-col items-end gap-1.5">
               <span
                 className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
-                style={{ background: `${rarityColor}15`, border: `1px solid ${rarityColor}25`, color: rarityColor }}
+                style={{
+                  background: `${rarityColor}15`,
+                  border: `1px solid ${rarityColor}25`,
+                  color: rarityColor
+                }}
               >
                 {achievement.rarity}
               </span>
+
               <span
                 className="text-[10px] px-2 py-0.5 rounded-full"
-                style={{ color: typeInfo.color, background: `${typeInfo.color}12` }}
+                style={{
+                  color: typeInfo.color,
+                  background: `${typeInfo.color}12`
+                }}
               >
                 {typeInfo.icon} {typeInfo.label}
               </span>
             </div>
           </div>
 
-          {/* Title */}
           <h3 className="font-bold text-white text-sm mb-1 leading-snug truncate" title={achievement.title}>
             {achievement.title}
           </h3>
-          <p className="text-[11px] text-slate-400 mb-1">Issued by: {achievement.issuerName}</p>
-          <p className="text-[11px] text-slate-500 mb-4 line-clamp-2 h-8 leading-normal">{achievement.description}</p>
 
-          {/* File Link Visualizer */}
+          <p className="text-[11px] text-slate-400 mb-1">
+            Issued by: {achievement.issuerName}
+          </p>
+
+          <p className="text-[11px] text-slate-500 mb-4 line-clamp-2 h-8 leading-normal">
+            {achievement.description}
+          </p>
+
           {achievement.certificateFileUrl && (
             <div className="mb-4 space-y-2">
               {achievement.certificateFileUrl.startsWith("data:image/") && (
@@ -460,9 +475,16 @@ function AchievementListCard({ achievement, claimed, index, onClaim, onShowQR })
                   />
                 </div>
               )}
+
               <a
                 href={achievement.certificateFileUrl}
-                download={achievement.certificateFileUrl.startsWith("data:") ? `${achievement.title.replace(/\s+/g, "_")}_Certificate.${achievement.certificateFileUrl.split(";")[0].split("/")[1] === "pdf" ? "pdf" : "png"}` : undefined}
+                download={
+                  achievement.certificateFileUrl.startsWith("data:")
+                    ? `${achievement.title.replace(/\s+/g, "_")}_Certificate.${
+                        achievement.certificateFileUrl.split(";")[0].split("/")[1] === "pdf" ? "pdf" : "png"
+                      }`
+                    : undefined
+                }
                 target={achievement.certificateFileUrl.startsWith("data:") ? undefined : "_blank"}
                 rel="noreferrer"
                 className="text-indigo-400 hover:text-indigo-300 text-xs font-semibold underline flex items-center gap-1.5"
@@ -475,7 +497,6 @@ function AchievementListCard({ achievement, claimed, index, onClaim, onShowQR })
       </div>
 
       <div className="px-5 pb-5">
-        {/* Points + Action */}
         <div className="flex items-center justify-between">
           <span className="badge-gold text-xs">⭐ {achievement.points} pts</span>
 
@@ -484,6 +505,7 @@ function AchievementListCard({ achievement, claimed, index, onClaim, onShowQR })
               <span className="badge-success text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                 🟢 Claimed & Verified
               </span>
+
               {achievement.tokenId && (
                 <span className="text-[9px] text-slate-500 font-mono">
                   Token ID: #{achievement.tokenId}
@@ -503,7 +525,6 @@ function AchievementListCard({ achievement, claimed, index, onClaim, onShowQR })
           )}
         </div>
 
-        {/* Verification Utilities Action Bar */}
         <div className="flex items-center gap-2 mt-4 pt-4 border-t border-white/5 justify-between">
           <button
             onClick={() => {
@@ -515,7 +536,7 @@ function AchievementListCard({ achievement, claimed, index, onClaim, onShowQR })
           >
             📋 Copy Link
           </button>
-          
+
           <button
             onClick={onShowQR}
             className="text-slate-400 hover:text-slate-200 transition-all text-[11px] flex items-center gap-1 font-medium"
